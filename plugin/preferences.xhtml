@@ -1,0 +1,66 @@
+<vbox id="pdf-to-md-prefs">
+	<groupbox>
+		<label><html:h2>General</html:h2></label>
+
+		<label value="Output folder for Markdown files"/>
+		<hbox align="center">
+			<html:input type="text" id="pdf-to-md-pref-outputDir" flex="1"
+				preference="extensions.pdf-to-md.outputDir"/>
+			<button label="Choose…" data-pick="outputDir" data-folder="true"/>
+		</hbox>
+
+		<checkbox id="pdf-to-md-pref-metadataNames" native="true"
+			preference="extensions.pdf-to-md.metadataNames"
+			label="Name files from item details (Author - Year - Title) instead of the PDF's file name"/>
+
+		<checkbox id="pdf-to-md-pref-stripHeaders" native="true"
+			preference="extensions.pdf-to-md.stripHeaders"
+			label="Remove repeating headers and footers (page numbers, copyright notices etc.)"/>
+
+		<checkbox id="pdf-to-md-pref-overwrite" native="true"
+			preference="extensions.pdf-to-md.overwrite"
+			label="Overwrite Markdown files that already exist (otherwise those PDFs are skipped)"/>
+
+		<label value="Handling items with several PDFs (e.g. a book with chapters)"/>
+		<menulist id="pdf-to-md-pref-multiMode" native="true"
+			preference="extensions.pdf-to-md.multiMode">
+			<menupopup>
+				<menuitem value="folder" label="Subfolder: Item/01 - chapter.md, 02 - …"/>
+				<menuitem value="flat" label="No subfolder: Item - 01 - chapter.md, …"/>
+				<menuitem value="merge" label="Merge into one file: Item.md"/>
+			</menupopup>
+		</menulist>
+
+	</groupbox>
+
+	<groupbox>
+		<!-- Collapsed by default. -->
+		<html:details id="pdf-to-md-advanced">
+			<html:summary><html:h2>Advanced</html:h2></html:summary>
+			<vbox>
+				<checkbox id="pdf-to-md-pref-pageMarkers" native="true"
+					preference="extensions.pdf-to-md.pageMarkers"
+					label="Mark the start of each page: [PDF page 5 · printed p. 287]"/>
+
+				<checkbox id="pdf-to-md-pref-htmlTables" native="true"
+					preference="extensions.pdf-to-md.htmlTables"
+					label="Write tables as HTML instead of Markdown (keeps merged cells)"/>
+
+				<checkbox id="pdf-to-md-pref-repairSymbols" native="true"
+					preference="extensions.pdf-to-md.repairSymbols"
+					label="Repair broken symbol encodings"/>
+
+				<label value="OCR language(s) for scans, e.g. eng or eng+deu (other languages: brew install tesseract-lang)"/>
+				<html:input type="text" id="pdf-to-md-pref-ocrLanguage"
+					preference="extensions.pdf-to-md.ocrLanguage"/>
+
+				<label value="Python interpreter (leave empty: packages are installed automatically via uv, or a private venv)"/>
+				<hbox align="center">
+					<html:input type="text" id="pdf-to-md-pref-pythonPath" flex="1"
+						preference="extensions.pdf-to-md.pythonPath"/>
+					<button label="Choose…" data-pick="pythonPath"/>
+				</hbox>
+			</vbox>
+		</html:details>
+	</groupbox>
+</vbox>

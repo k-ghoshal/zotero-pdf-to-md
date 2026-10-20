@@ -1,0 +1,30 @@
+/* PDF to Markdown settings pane. Zotero adds this stylesheet to the whole
+   Settings window, so every rule is scoped to the pane. */
+
+/* A thin line between General and Advanced, visible in light and dark themes. */
+#pdf-to-md-prefs > groupbox + groupbox {
+  border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+/* The "Advanced" heading on the same line as its disclosure triangle. */
+#pdf-to-md-advanced > summary {
+  cursor: pointer;
+}
+#pdf-to-md-advanced > summary > h2 {
+  display: inline;
+}
+
+/* Space between settings; a label's own field or dropdown stays close to it. */
+#pdf-to-md-prefs groupbox > label:not(:first-child),
+#pdf-to-md-prefs groupbox > checkbox,
+#pdf-to-md-advanced > vbox > label,
+#pdf-to-md-advanced > vbox > checkbox {
+  margin-top: 12px;
+}
+#pdf-to-md-prefs groupbox > hbox,
+#pdf-to-md-prefs groupbox > menulist,
+#pdf-to-md-advanced > vbox > hbox,
+#pdf-to-md-advanced > vbox > input {
+  margin-top: 8px;
+}

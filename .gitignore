@@ -1,0 +1,4 @@
+*.pdf
+/dev/
+.DS_Store
+__pycache__/

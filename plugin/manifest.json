@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "PDF to Markdown",
+  "version": "1.6.3",
+  "description": "Converts the PDFs of selected items to Markdown.",
+  "homepage_url": "https://github.com/k-ghoshal/zotero-pdf-to-md",
+  "author": "Kaustubh Ghoshal",
+  "icons": {
+    "48": "icon.svg",
+    "96": "icon.svg"
+  },
+  "applications": {
+    "zotero": {
+      "id": "pdf-to-md@kaust.local",
+      "update_url": "https://example.invalid/pdf-to-md/updates.json",
+      "strict_min_version": "9.0",
+      "strict_max_version": "10.*"
+    }
+  }
+}

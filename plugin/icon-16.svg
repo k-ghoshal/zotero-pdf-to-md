@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 96 96">
+  <!-- 16px version of icon.svg for the item pane (Zotero shows it at 16px without scaling;
+       the 96px original was cropped). Fixed colours so it reads in light and dark themes. -->
+  <path d="M20 6h40l20 20v62a4 4 0 0 1-4 4H20a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4z" fill="#2f6fde"/>
+  <path d="M60 6v16a4 4 0 0 0 4 4h16z" fill="#9dbcf2"/>
+  <text x="48" y="72" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
+        font-size="30" font-weight="700" fill="#ffffff">MD</text>
+</svg>
