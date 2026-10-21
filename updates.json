@@ -1,0 +1,19 @@
+{
+  "addons": {
+    "pdf-to-md@kaust.local": {
+      "updates": [
+        {
+          "version": "1.6.4",
+          "update_link": "https://github.com/k-ghoshal/zotero-pdf-to-md/releases/download/v1.6.4/pdf-to-md.xpi",
+          "update_hash": "sha256:1d7efab788d3317098efc08d92f950ed88981eeaed93441f3a43cc28911ca76c",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "9.0",
+              "strict_max_version": "10.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
