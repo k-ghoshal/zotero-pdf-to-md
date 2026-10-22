@@ -148,7 +148,9 @@ def fixed_copy(pdf: Path, opts: Options):
       for example, maps ☞ to "F" + U+F046 and → to "à" + U+F0E0.
     The original PDF is never modified."""
     fixes = [("remove stamps from scanned pages", remove_scan_stamps,
-              "removed stamp text from {} scanned page(s), so OCR text is kept")]
+              "removed stamp text from {} scanned page(s), so OCR text is kept"),
+             ("check OCR text past the page edge", widen_pages_to_ocr_text,
+              "widened {} page(s) whose OCR text runs past the page edge")]
     if opts.repair_symbols:
         fixes.append(("check symbol fonts", add_wingdings_unicode_maps,
                       "added Unicode map to {} Wingdings font(s)"))
@@ -172,6 +174,32 @@ def fixed_copy(pdf: Path, opts: Options):
             copy = Path(tmp) / pdf.name
             doc.save(copy)
             yield copy
+
+
+def widen_pages_to_ocr_text(doc: "pymupdf.Document", min_share: float = 0.02) -> int:
+    """Widen pages whose invisible (OCR) text runs past the page edge, so it
+    can all be read, and return the number of pages changed. Text extraction
+    stops at the page edge, so such lines lost their ends: in some JSTOR
+    scans the OCR layer is stretched to 1.2-2.4 times the page width.
+    A page is changed only if more than `min_share` of its OCR text lies
+    outside it; unrotated pages only."""
+    widened = 0
+    for page in doc:
+        if page.rotation:
+            continue
+        hidden = [pymupdf.Rect(s["bbox"]) for s in page.get_texttrace() if s["type"] == 3]
+        edge = page.rect + (-2, -2, 2, 2)
+        outside = [r for r in hidden if not r.is_empty and r not in edge]
+        if not outside or len(outside) <= min_share * len(hidden):
+            continue
+        target = pymupdf.Rect(page.rect)
+        for r in outside:
+            target |= r
+        box = target * ~page.transformation_matrix  # page coordinates -> PDF coordinates
+        box.normalize()
+        page.set_mediabox(box)
+        widened += 1
+    return widened
 
 
 def remove_scan_stamps(doc: "pymupdf.Document", min_image: float = 0.9,
@@ -530,7 +558,11 @@ def with_pymupdf4llm_ocr_layer(pdf: Path, opts: Options) -> list[tuple[int, str]
     from pymupdf4llm.helpers import pymupdf_rag
 
     check_password(pdf)
-    kwargs = {"ignore_alpha": True, "page_chunks": True, "show_progress": False}
+    # ignore_images: the scan itself is a page image. Where widen_pages_to_ocr_text
+    # widened the page, it no longer fills the page, counts as a figure, and the
+    # text over it would be dropped.
+    kwargs = {"ignore_alpha": True, "ignore_images": True, "page_chunks": True,
+              "show_progress": False}
     if opts.html_tables:
         kwargs["table_output"] = "html"
     return _numbered(pymupdf_rag.to_markdown(str(pdf), **kwargs))
