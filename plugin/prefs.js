@@ -21,3 +21,5 @@ pref("extensions.pdf-to-md.repairSymbols", true);
 // Name files for items with one PDF from the item's details ("Author - Year - Title")
 // instead of the PDF's name.
 pref("extensions.pdf-to-md.metadataNames", true);
+// Keep the progress popup above all windows; a click hides it during a run.
+pref("extensions.pdf-to-md.keepOnTop", false);

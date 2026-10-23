@@ -7,10 +7,12 @@ PdfToMd = {
   rootURI: null, // where the plugin's files are, ending in "/"
   menuID: null, // returned by MenuManager.registerMenu, used to remove it
   locateMenuID: null, // same, for the entries in the item pane's Locate menu
+  toolsMenuID: null, // same, for "Show Progress" in the Tools menu
   sectionID: null, // returned by ItemPaneManager.registerSection
   prefsPaneID: null, // returned by PreferencePanes.register, to open the pane
   sectionRefreshers: new Map(), // section body -> its refresh(), for after a run
   currentRun: null, // the conversion in progress (see handleConvertCommand)
+  lastRun: null, // the last finished run, for Show Progress afterwards
 
   init({ id, rootURI }) {
     this.id = id;
@@ -29,17 +31,20 @@ PdfToMd = {
     // uninstalled, but not on an upgrade, so remove it here every time.
     if (this.menuID) Zotero.MenuManager.unregisterMenu(this.menuID);
     if (this.locateMenuID) Zotero.MenuManager.unregisterMenu(this.locateMenuID);
-    this.menuID = this.locateMenuID = null;
+    if (this.toolsMenuID) Zotero.MenuManager.unregisterMenu(this.toolsMenuID);
+    this.menuID = this.locateMenuID = this.toolsMenuID = null;
     if (this.sectionID) Zotero.ItemPaneManager.unregisterSection(this.sectionID);
     this.sectionID = null;
     this.sectionRefreshers.clear();
     // A run in progress: its script keeps going, but the popup can't update.
     this.currentRun?.stopTimer?.();
     this.currentRun?.view?.pw.close();
+    this.lastRun?.view?.pw.close();
   },
 
-  // One item in the context menu of library items. Its label is
-  // "pdf-to-md-menu" in locale/en-US/pdf-to-md.ftl.
+  // The context menu of library items: Convert, and during a run "Show
+  // Conversion Progress". Also "Show Progress" in the Tools menu. Labels are
+  // in locale/en-US/pdf-to-md.ftl.
   addMenu() {
     this.menuID = Zotero.MenuManager.registerMenu({
       menuID: "pdf-to-md",
@@ -51,6 +56,24 @@ PdfToMd = {
           l10nID: "pdf-to-md-menu",
           onCommand: (_event, context) =>
             this.handleConvertCommand(context?.items || this.selectedItems()),
+        },
+        {
+          menuType: "menuitem",
+          l10nID: "pdf-to-md-menu-progress",
+          onShowing: (_event, context) => context.setVisible(!!this.currentRun),
+          onCommand: () => this.showProgressCommand(),
+        },
+      ],
+    });
+    this.toolsMenuID = Zotero.MenuManager.registerMenu({
+      menuID: "pdf-to-md-tools",
+      pluginID: this.id,
+      target: "main/menubar/tools",
+      menus: [
+        {
+          menuType: "menuitem",
+          l10nID: "pdf-to-md-tools-progress",
+          onCommand: () => this.showProgressCommand(),
         },
       ],
     });
@@ -695,6 +718,8 @@ PdfToMd = {
     } finally {
       run.stopTimer();
       this.currentRun = null;
+      this.lastRun?.view?.pw.close();
+      this.lastRun = run;
       this.showProgress(run, true);
       this.refreshSections();
     }
@@ -808,14 +833,41 @@ PdfToMd = {
   PROGRESS_PREFIX: "@pdf-to-md-progress", // same as in pdf_to_md.py
   PROGRESS_ROWS: 10, // rows shown at once; the headline counts the rest
 
+  // Show Progress (Tools menu, context menu): the running conversion's
+  // popup, or the last run's summary.
+  showProgressCommand() {
+    const run = this.currentRun || this.lastRun;
+    if (!run) {
+      this.notify("No conversion has run since Zotero started.");
+      return;
+    }
+    this.showProgress(run, run !== this.currentRun);
+  },
+
   // Opens the run's popup, replacing any open one so it comes to the front.
   // `final`: the run has ended; show the summary and close on a timer or click.
+  // With the keepOnTop setting, the popup floats above all windows, and a
+  // click hides it during a run too (Show Progress brings it back).
   showProgress(run, final = false) {
     run.view?.pw.close();
-    const pw = new Zotero.ProgressWindow({ closeOnClick: final });
-    run.view = { pw, ui: [] };
+    const onTop = this.getBoolPref("keepOnTop", false);
+    const pw = new Zotero.ProgressWindow({
+      closeOnClick: final || onTop,
+      window: onTop ? this.onTopParent() : undefined,
+    });
+    const view = (run.view = { pw, ui: [] });
+    // Once closed (click, timer), stop updating it: Zotero keeps every call to
+    // a closed popup, waiting for it to load again, and the spinner calls 8×/s.
+    const close = pw.close;
+    pw.close = () => {
+      if (run.view === view) run.view = null;
+      close();
+    };
     pw.show();
     this.paintProgress(run, final);
+    if (onTop && !final) {
+      pw.addDescription("Click to hide. Tools → PDF to Markdown: Show Progress brings it back.");
+    }
     if (final) {
       const isError = run.batches.some((b) => b.isError);
       // One count line for the whole run, then the other summary lines.
@@ -832,6 +884,23 @@ PdfToMd = {
       );
       pw.startCloseTimer(isError ? 10000 : 8000);
     }
+  },
+
+  // A stand-in for the main window that Zotero.ProgressWindow opens its
+  // popup from. Zotero asks for a dependent window, which drops behind the
+  // main window when that is clicked; this asks for an always-on-top one,
+  // the option Zotero itself uses when there is no main window.
+  onTopParent() {
+    const main = Zotero.getMainWindow();
+    if (!main) return undefined;
+    return {
+      openDialog: (url, name, features) =>
+        main.openDialog(url, name, features.replace(/,?dependent=yes/, "") + ",alwaysontop=yes"),
+      addEventListener: (...args) => main.addEventListener(...args),
+      get closed() {
+        return main.closed;
+      },
+    };
   },
 
   // Brings the popup's headline and rows up to date with run.rows. The rows

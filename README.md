@@ -51,6 +51,10 @@ needs review: Some Scan.pdf: almost no text (0 chars/page) - likely a scan, need
 Conversions started during a run are queued. The first run is slower while packages install; long
 scans with OCR can take a minute or two.
 
+If the popup goes behind other windows, **Tools → PDF to Markdown: Show Progress** (or
+**📝 Show Conversion Progress** in the item context menu, during a run) brings it back. After a run,
+it shows the last summary again.
+
 ### Item pane
 
 Items with PDFs get a **PDF to Markdown** section in the item pane, showing each output file's state:
@@ -135,6 +139,7 @@ page_markers: "[PDF page N] starts each page; 'printed p. X' is the number print
 | Repair broken symbol encodings | on | Fixes Wingdings symbols such as ☞ and → that otherwise come out as "F" and "à". |
 | Write tables as HTML | off | Keeps merged cells in complex tables. |
 | OCR language(s) | `eng` | Tesseract languages, e.g. `eng+deu`. |
+| Keep the progress popup on top | off | The popup stays above all windows, including other apps' windows; click it to hide it during a run. |
 | Python interpreter | empty | Empty = managed by the plugin. A custom Python needs `pymupdf4llm<2` and `pdfplumber`. |
 
 ## How it works

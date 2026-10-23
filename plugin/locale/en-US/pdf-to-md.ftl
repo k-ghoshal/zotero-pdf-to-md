@@ -1,6 +1,12 @@
 pdf-to-md-menu =
     .label = 📝 PDF to Markdown
 
+pdf-to-md-menu-progress =
+    .label = 📝 Show Conversion Progress
+
+pdf-to-md-tools-progress =
+    .label = PDF to Markdown: Show Progress
+
 pdf-to-md-section =
     .label = PDF to Markdown
     .tooltiptext = PDF to Markdown
