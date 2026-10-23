@@ -23,6 +23,17 @@
               "strict_max_version": "10.*"
             }
           }
+        },
+        {
+          "version": "1.6.6",
+          "update_link": "https://github.com/k-ghoshal/zotero-pdf-to-md/releases/download/v1.6.6/pdf-to-md.xpi",
+          "update_hash": "sha256:e4fe4f8f91bc31eb7f56563f7fcca9e351a69697a3cc0045ab6ca9b4293dcfe6",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "9.0",
+              "strict_max_version": "10.*"
+            }
+          }
         }
       ]
     }
