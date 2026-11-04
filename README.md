@@ -46,6 +46,8 @@ review) or ✗ (failed). At the end it shows a summary:
 3 converted → /Users/you/output-folder
 1 skipped (already converted)
 needs review: Some Scan.pdf: almost no text (0 chars/page) - likely a scan, needs OCR
+1 file(s) with unreadable characters (see unreadable_characters in the file header)
+installing these fonts may fix them: CambriaMath, TimesNewRomanPSMT
 ```
 
 Conversions started during a run are queued. The first run is slower while packages install; long
@@ -136,11 +138,11 @@ page_markers: "[PDF page N] starts each page; 'printed p. X' is the number print
 | Setting | Default | |
 |---|---|---|
 | Mark the start of each page | on | Adds `[PDF page N · printed p. X]` markers. |
-| Repair broken symbol encodings | on | Fixes Wingdings symbols such as ☞ and → that otherwise come out as "F" and "à". |
+| Repair broken symbol encodings | on | Fixes symbols and letters that otherwise come out as "F", "à" or "�": Wingdings, Symbol, small capitals, IPA and accent glyphs, and glyphs matched against your installed fonts (including Microsoft Office's). |
 | Write tables as HTML | off | Keeps merged cells in complex tables. |
 | OCR language(s) | `eng` | Tesseract languages, e.g. `eng+deu`. |
 | Keep the progress popup on top | off | The popup stays above all windows, including other apps' windows; click it to hide it during a run. |
-| Python interpreter | empty | Empty = managed by the plugin. A custom Python needs `pymupdf4llm<2` and `pdfplumber`. |
+| Python interpreter | empty | Empty = managed by the plugin. A custom Python needs `pymupdf4llm<2`, `pdfplumber` and `fonttools`. |
 
 ## How it works
 
@@ -153,7 +155,8 @@ For each PDF, the bundled script [`plugin/pdf_to_md.py`](plugin/pdf_to_md.py):
    landscape sheets are split first), and keeps the best result.
 4. Strips headers and footers and writes to the output folder or `_needs_review/`.
 
-It also repairs Wingdings symbols and fonts with no Unicode map, removes download stamps that stop
+It also repairs fonts whose characters come out wrong (Wingdings and Symbol, fonts with no
+Unicode map, glyphs known only by name or shape), removes download stamps that stop
 scans from being OCRed, and restores the text of examples and small tables that the
 layout detection mislabels as formulas.
 
@@ -170,6 +173,9 @@ See `--help` for options.
 - **Errors:** turn on **Help → Debug Output Logging**, convert again, then **View Output** and look
   for lines starting with `PdfToMd`.
 - **Scan in `_needs_review/` with "almost no text":** install Tesseract.
+- **"installing these fonts may fix them":** some characters in those PDFs couldn't be read because
+  the PDF's font isn't installed on your computer. Install the named fonts, then convert again with
+  **Overwrite** on.
 - **"not found (not synced/downloaded?)":** open the PDF in Zotero once to download it.
 - **"Neither uv nor Python 3 was found":** install uv, or set **Python interpreter** under Advanced.
 
