@@ -332,10 +332,8 @@ def add_glyph_unicode_maps(doc: "pymupdf.Document", min_match: float = 0.9) -> i
             if kind == "xref" and _parse_to_unicode(
                     doc.xref_stream(int(value.split()[0])).decode("latin-1")):
                 continue  # has a real map
-            refs = re.findall(r"(\d+) 0 R", doc.xref_get_key(xref, "DescendantFonts")[1])
-            if not refs:
+            if not (cid_font := _descendant_font(doc, xref)):
                 continue
-            cid_font = int(refs[0])
             descriptor = doc.xref_get_key(cid_font, "FontDescriptor")
             file_ref = (doc.xref_get_key(int(descriptor[1].split()[0]), "FontFile2")
                         if descriptor[0] == "xref" else ("null", ""))
@@ -566,15 +564,19 @@ def _is_junk(text: str) -> bool:
                            for c in text)
 
 
-def _extracted_text(doc: "pymupdf.Document", xref: int, codes: list[int]) -> dict[int, str]:
-    """What MuPDF extracts for each one-byte code of font `xref`: each code is
+def _extracted_text(doc: "pymupdf.Document", xref: int, codes: list[int],
+                    code_bytes: int = 1) -> dict[int, str]:
+    """What MuPDF extracts for each code of font `xref`: each code is
     written on its own line of a scratch page, which is removed again."""
+    if len(codes) > 500:  # keep the scratch page a sensible size
+        return {k: v for i in range(0, len(codes), 500)
+                for k, v in _extracted_text(doc, xref, codes[i:i + 500], code_bytes).items()}
     page = doc.new_page(width=100, height=12 * len(codes) + 20)
     try:
         stream = doc.get_new_xref()
         doc.update_object(stream, "<<>>")
         doc.update_stream(stream, "".join(
-            f"BT /F0 10 Tf 10 {12 * i + 10} Td <{code:02X}> Tj ET\n"
+            f"BT /F0 10 Tf 10 {12 * i + 10} Td <{code:0{2 * code_bytes}X}> Tj ET\n"
             for i, code in enumerate(codes)).encode())
         doc.xref_set_key(page.xref, "Resources", f"<< /Font << /F0 {xref} 0 R >> >>")
         page.set_contents(stream)
@@ -688,7 +690,6 @@ def add_outline_unicode_maps(doc: "pymupdf.Document") -> int:
     at."""
     seen, fixed = set(), 0
     junk_fonts = _fonts_with_junk(doc)
-    junk_glyphs: dict[str, set[int]] | None = None
     for pno in range(doc.page_count):
         for xref, _ext, ftype, basefont, _name, _enc in doc.get_page_fonts(pno):
             if xref in seen:
@@ -704,10 +705,7 @@ def add_outline_unicode_maps(doc: "pymupdf.Document") -> int:
                 if ftype in ("Type1", "MMType1", "TrueType"):
                     found, code_bytes = _outline_codes(doc, xref, installed), 1
                 elif ftype == "Type0":
-                    if junk_glyphs is None:
-                        junk_glyphs = _junk_glyphs(doc)
-                    found = _outline_cids(doc, xref, installed, junk_glyphs.get(basefont, set()))
-                    code_bytes = 2
+                    found, code_bytes = _outline_cids(doc, xref, installed), 2
                 else:
                     continue
             except Exception as e:  # a damaged or unusual font file
@@ -740,65 +738,67 @@ def _outline_codes(doc: "pymupdf.Document", xref: int,
     embedded = _embedded_outlines(doc, xref) if junk else None
     if not embedded:
         return {}
-    glyphs, _order, scale, names = embedded
-    names = {**names, **_glyph_names(doc, xref)}
+    glyphs, _order, scale, cmap_names = embedded
+    names = _glyph_names(doc, xref)
     index = _outline_index(*installed)
     found = {}
     for code in junk:
-        glyph = names.get(code)
-        if glyph and glyph in glyphs and (new := index.match(glyphs[glyph], glyphs, scale,
-                                                             widths[code])):
+        # the PDF's name for the glyph, else the embedded font's cmap's (a
+        # TrueType subset may not have the glyph names /Differences gives)
+        glyph = next((g for g in (names.get(code), cmap_names.get(code)) if g in glyphs), None)
+        if glyph and (new := index.match(glyphs[glyph], glyphs, scale, widths[code])):
             found[code] = new
     return found
 
 
-def _outline_cids(doc: "pymupdf.Document", xref: int, installed: tuple[Path, int],
-                  junk: set[int]) -> dict[int, str]:
-    """For a two-byte (Identity-H) font: code -> text for the glyphs in `junk`
-    (glyph numbers in the embedded font) that the installed font has."""
-    if not junk or doc.xref_get_key(xref, "Encoding")[1] != "/Identity-H":
+def _outline_cids(doc: "pymupdf.Document", xref: int,
+                  installed: tuple[Path, int]) -> dict[int, str]:
+    """For a two-byte (Identity-H) font: code (= CID) -> text for the CIDs
+    MuPDF reads as junk whose glyph the installed font has. The CIDs looked at
+    are those /W gives a width, i.e. the ones the PDF uses."""
+    if doc.xref_get_key(xref, "Encoding")[1] != "/Identity-H":
         return {}
-    refs = re.findall(r"(\d+) 0 R", doc.xref_get_key(xref, "DescendantFonts")[1])
-    embedded = _embedded_outlines(doc, int(refs[0])) if refs else None
+    cid_font = _descendant_font(doc, xref)
+    embedded = _embedded_outlines(doc, cid_font) if cid_font else None
     if not embedded:
         return {}
-    cid_font = int(refs[0])
     glyphs, order, scale, _names = embedded
+    cid_keyed = {int(g[3:]): g for g in order if g.startswith("cid") and g[3:].isdigit()}
     kind, value = doc.xref_get_key(cid_font, "CIDToGIDMap")
-    if kind == "xref":  # two bytes per CID: its glyph number
-        data = doc.xref_stream(int(value.split()[0]))
-        cid_of = {struct.unpack(">H", data[i:i + 2])[0]: i // 2 for i in range(0, len(data) - 1, 2)}
-    else:
-        cid_of = {}
+    gid_map = doc.xref_stream(int(value.split()[0])) if kind == "xref" else None
+
+    def glyph_of(cid: int) -> str | None:
+        if cid_keyed:
+            return cid_keyed.get(cid)
+        gid = (struct.unpack(">H", gid_map[2 * cid:2 * cid + 2])[0]
+               if gid_map and 2 * cid + 2 <= len(gid_map) else cid)
+        return order[gid] if 0 < gid < len(order) else None
+
     widths = _cid_widths(doc, cid_font)
     kind, value = doc.xref_get_key(cid_font, "DW")
     default = float(value) if kind in ("int", "real") else 1000.0
+    cids = sorted(widths) or sorted(cid_keyed) or list(range(1, len(order)))
+    text = _extracted_text(doc, xref, cids, code_bytes=2)
     index = _outline_index(*installed)
     found = {}
-    for gid in sorted(junk):
-        if gid >= len(order):
+    for cid in cids:
+        if not _is_junk(text.get(cid, "")):
             continue
-        glyph = order[gid]
-        if glyph not in glyphs:
-            continue
-        if glyph.startswith("cid") and glyph[3:].isdigit():  # CID-keyed CFF
-            cid = int(glyph[3:])
-        else:
-            cid = cid_of.get(gid, gid) if cid_of else gid
-        if (new := index.match(glyphs[glyph], glyphs, scale, widths.get(cid, default))):
+        glyph = glyph_of(cid)
+        if glyph in glyphs and (new := index.match(glyphs[glyph], glyphs, scale,
+                                                   widths.get(cid, default))):
             found[cid] = new
     return found
 
 
-def _junk_glyphs(doc: "pymupdf.Document") -> dict[str, set[int]]:
-    """Font name (with subset prefix) -> glyph numbers whose text is junk."""
-    glyphs: dict[str, set[int]] = {}
-    for page in doc:
-        for span in page.get_texttrace():
-            for c in span["chars"]:
-                if _is_junk(chr(c[0])):
-                    glyphs.setdefault(span["font"], set()).add(c[1])
-    return glyphs
+def _descendant_font(doc: "pymupdf.Document", xref: int) -> int | None:
+    """The CID font of Type0 font `xref`. DescendantFonts is an array, inline
+    or as a reference to one."""
+    kind, value = doc.xref_get_key(xref, "DescendantFonts")
+    if kind == "xref":
+        value = doc.xref_object(int(value.split()[0]), compressed=True)
+    refs = re.findall(r"(\d+) 0 R", value)
+    return int(refs[0]) if refs else None
 
 
 def _embedded_outlines(doc: "pymupdf.Document", font_xref: int):
@@ -902,6 +902,8 @@ class _OutlineIndex:
     def match(self, glyph, glyphs, scale: float, width: float) -> str | None:
         """The text of the installed glyph with this width and drawing, if any."""
         target = _outline_measures(glyph, glyphs, scale)
+        if target is None and round(width) <= 0:
+            return None  # an unused slot, not a space
         scored = []
         for w in range(round(width) - 1, round(width) + 2):
             for candidate in self.by_width.get(w, ()):
