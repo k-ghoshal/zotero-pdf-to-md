@@ -145,8 +145,9 @@ def ensure_tesseract_on_path() -> bool:
 # Fonts whose text stays unreadable because they aren't installed here, by PDF
 # (str of its path), for the summary: installing them may fix the text.
 MISSING_FONTS: dict[str, set[str]] = {}
-# Filled by the font fixes while `fixed_copy` runs them on one PDF.
-_missing_now: set[str] = set()
+# Filled by the font fixes while `fixed_copy` runs them on one PDF:
+# font name -> its name in the extracted text (`_text_font_name`).
+_missing_now: dict[str, str] = {}
 
 
 @contextlib.contextmanager
@@ -184,8 +185,10 @@ def fixed_copy(pdf: Path, opts: Options):
             if n:
                 print(f"         {pdf.name}: {done.format(n)}", file=sys.stderr)
                 changed = True
-        if _missing_now and (still := _fonts_with_junk(doc) & _missing_now):
-            MISSING_FONTS[str(pdf)] = still
+        if _missing_now:
+            junk = _fonts_with_junk(doc)
+            if still := {name for name, text_name in _missing_now.items() if text_name in junk}:
+                MISSING_FONTS[str(pdf)] = still
         if not changed:
             yield pdf
             return
@@ -343,7 +346,7 @@ def add_glyph_unicode_maps(doc: "pymupdf.Document", min_match: float = 0.9) -> i
             name = basefont.split("+")[-1]
             installed = system_fonts().get(name)
             if not installed:
-                _note_missing(name, "has no Unicode map")
+                _note_missing(basefont, "has no Unicode map")
                 continue
             widths = _cid_widths(doc, cid_font)
             mapping = _glyph_map(pymupdf.Font(fontbuffer=_font_data(*installed)), widths, min_match)
@@ -413,7 +416,7 @@ def add_name_unicode_maps(doc: "pymupdf.Document") -> int:
                 continue
             seen.add(xref)
             name = basefont.split("+")[-1]
-            if name not in junk_fonts:
+            if _text_font_name(basefont) not in junk_fonts:
                 continue
             if ftype == "Type0":
                 found = {code: new for code, text in _to_unicode_map(doc, xref).items()
@@ -465,8 +468,16 @@ def _simple_widths(doc: "pymupdf.Document", xref: int) -> dict[int, float]:
     return {first + i: w for i, w in enumerate(widths) if first + i < 256}
 
 
+def _text_font_name(basefont: str) -> str:
+    """The font's name as MuPDF gives it in extracted text (spans, texttrace):
+    the BaseFont cut to 31 characters, then without the subset prefix
+    ("ABCDEF+MathDesign-CH-Regular-Extension-10" -> "MathDesign-CH-Regular-Ex")."""
+    return basefont[:31].split("+")[-1]
+
+
 def _fonts_with_junk(doc: "pymupdf.Document") -> set[str]:
-    """Names (without subset prefix) of the fonts whose text contains junk."""
+    """Names of the fonts whose text contains junk, as `_text_font_name` gives
+    them."""
     fonts = set()
     for page in doc:
         for span in page.get_texttrace():
@@ -696,10 +707,11 @@ def add_outline_unicode_maps(doc: "pymupdf.Document") -> int:
                 continue
             seen.add(xref)
             name = basefont.split("+")[-1]
-            if name not in junk_fonts or ftype not in ("Type1", "MMType1", "TrueType", "Type0"):
+            if (_text_font_name(basefont) not in junk_fonts
+                    or ftype not in ("Type1", "MMType1", "TrueType", "Type0")):
                 continue
             if not (installed := system_fonts().get(name)):
-                _note_missing(name, "has glyphs without Unicode")
+                _note_missing(basefont, "has glyphs without Unicode")
                 continue
             try:
                 if ftype in ("Type1", "MMType1", "TrueType"):
@@ -717,13 +729,14 @@ def add_outline_unicode_maps(doc: "pymupdf.Document") -> int:
     return fixed
 
 
-def _note_missing(name: str, problem: str) -> None:
-    """Log (once per PDF) that font `name` would be needed to repair its text,
-    and remember it for the summary. Names without three lowercase letters in
-    a row are publisher-private and skipped."""
+def _note_missing(basefont: str, problem: str) -> None:
+    """Log (once per PDF) that font `basefont` would be needed to repair its
+    text, and remember it for the summary. Names without three lowercase
+    letters in a row are publisher-private and skipped."""
+    name = basefont.split("+")[-1]
     if name in _missing_now or not re.search(r"[a-z]{3}", name):
         return
-    _missing_now.add(name)
+    _missing_now[name] = _text_font_name(basefont)
     print(f"         font {name} {problem} and isn't installed here,"
           " so its text can't be repaired", file=sys.stderr)
 
@@ -1018,7 +1031,7 @@ def add_shape_unicode_maps(doc: "pymupdf.Document", max_distance: float = 2.0,
     accent written before its letter is mapped to a placeholder that
     `fix_prefix_accents` moves behind the letter."""
     seen, fixed = set(), 0
-    todo: dict[int, tuple[str, dict[int, str]]] = {}  # font xref -> (name, unmapped codes)
+    todo: dict[int, tuple[str, dict[int, str]]] = {}  # font xref -> (name in the text, unmapped codes)
     old_maps: dict[int, dict[int, str]] = {}
     for pno in range(doc.page_count):
         for xref, _ext, _type, basefont, _name, _enc in doc.get_page_fonts(pno):
@@ -1033,7 +1046,7 @@ def add_shape_unicode_maps(doc: "pymupdf.Document", max_distance: float = 2.0,
                 old = _parse_to_unicode(doc.xref_stream(int(value.split()[0])).decode("latin-1"))
             codes = _unmapped_codes(doc, xref, old)
             if codes:
-                todo[xref] = (basefont.split("+")[-1], codes)
+                todo[xref] = (_text_font_name(basefont), codes)
                 old_maps[xref] = old
     if not todo:
         return 0
@@ -1331,17 +1344,14 @@ def add_pi_unicode_maps(doc: "pymupdf.Document") -> int:
     used: dict[str, set[str]] = {}
     for page in doc:
         for span in page.get_texttrace():
-            name = span["font"].split("+")[-1]
-            if PI_FONT.search(name):
-                used.setdefault(name, set()).update(
-                    chr(c[0]) for c in span["chars"] if not _is_junk(chr(c[0])))
-    if not used:
-        return 0
+            used.setdefault(span["font"].split("+")[-1], set()).update(
+                chr(c[0]) for c in span["chars"] if not _is_junk(chr(c[0])))
     seen, fixed = set(), 0
     for pno in range(doc.page_count):
         for xref, _ext, _type, basefont, _name, _enc in doc.get_page_fonts(pno):
             name = basefont.split("+")[-1]
-            if xref in seen or name not in used or PI_SKIP.search(name):
+            uses = used.get(_text_font_name(basefont))
+            if xref in seen or uses is None or not PI_FONT.search(name) or PI_SKIP.search(name):
                 continue
             seen.add(xref)
             if doc.xref_get_key(xref, "Subtype")[1] not in ("/TrueType", "/Type1"):
@@ -1357,11 +1367,11 @@ def add_pi_unicode_maps(doc: "pymupdf.Document") -> int:
                 found = {}
             raised = "superscript" in name.lower()
             glyphs = {code: _draw_glyph(doc, xref, code) for code, claimed in text.items()
-                      if claimed in used[name] and claimed.isascii() and claimed.isalpha()}
+                      if claimed in uses and claimed.isascii() and claimed.isalpha()}
             small_caps = _is_small_caps(glyphs, text)
             for code, claimed in text.items():
                 # Pi fonts hide symbols under the names of WinAnsi characters.
-                if code < 33 or claimed not in used[name] or claimed.isspace() \
+                if code < 33 or claimed not in uses or claimed.isspace() \
                         or not claimed.encode("cp1252", "ignore") \
                         or small_caps and claimed.isascii() and claimed.islower():
                     continue
