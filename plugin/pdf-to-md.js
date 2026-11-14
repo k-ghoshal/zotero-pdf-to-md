@@ -878,10 +878,7 @@ PdfToMd = {
         .flatMap((b) => b.text.split("\n"))
         .filter((l) => !/^\d+ (converted →|skipped \(already converted\))/.test(l));
       const lines = [...new Set([...head, ...rest])];
-      pw.addDescription(
-        lines.slice(0, 8).join("\n") +
-          (lines.length > 8 ? `\n… (${lines.length - 8} more lines in Debug Output)` : "")
-      );
+      pw.addDescription(this.popupText(lines));
       pw.startCloseTimer(isError ? 10000 : 8000);
     }
   },
@@ -997,14 +994,28 @@ PdfToMd = {
     return { exitCode, stdout, stderr };
   },
 
+  // The popup doesn't wrap long lines, so wrap them at word breaks (a long
+  // word is cut) and keep at most 8 lines.
+  popupText(lines, width = 60, maxLines = 8) {
+    const out = [];
+    for (const line of lines) {
+      let rest = line;
+      while (rest.length > width) {
+        let cut = rest.lastIndexOf(" ", width);
+        if (cut < width / 2) cut = width;
+        out.push(rest.slice(0, cut));
+        rest = rest.slice(cut).trimStart();
+      }
+      out.push(rest);
+    }
+    return out.slice(0, maxLines).join("\n") +
+      (out.length > maxLines ? `\n… (${out.length - maxLines} more lines in Debug Output)` : "");
+  },
+
   notify(text, isError = false) {
     const pw = new Zotero.ProgressWindow({ closeOnClick: true });
     pw.changeHeadline(isError ? "PDF to Markdown — error" : "PDF to Markdown");
-    // Keep the popup readable if the script prints a lot.
-    const lines = String(text).split("\n");
-    const shown = lines.slice(0, 8).join("\n") +
-      (lines.length > 8 ? `\n… (${lines.length - 8} more lines in Debug Output)` : "");
-    pw.addDescription(shown);
+    pw.addDescription(this.popupText(String(text).split("\n")));
     pw.show();
     pw.startCloseTimer(isError ? 10000 : 6000);
   },
