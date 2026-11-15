@@ -23,3 +23,5 @@ pref("extensions.pdf-to-md.repairSymbols", true);
 pref("extensions.pdf-to-md.metadataNames", true);
 // Keep the progress popup above all windows; a click hides it during a run.
 pref("extensions.pdf-to-md.keepOnTop", false);
+// Link each Markdown file to its Zotero item as an attachment.
+pref("extensions.pdf-to-md.attachMarkdown", false);

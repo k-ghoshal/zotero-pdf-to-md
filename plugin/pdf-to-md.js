@@ -281,12 +281,15 @@ PdfToMd = {
       queued: "queued",
       start: "converting…",
     };
+    const target = this.getBoolPref("attachMarkdown", false) ? this.sectionTarget(item) : null;
+    const attached = new Set(target?.isRegularItem() ? this.linkedMarkdown(target).map((e) => e.path) : []);
     const lines = jobs.map((job, i) => {
       // The existing file's name, else the name a conversion would use; for
       // a book, just "01 - chapter".
       let name = files[i] ? PathUtils.filename(files[i].path).replace(/\.md$/, "") : job.out.split("/").pop();
       if (prefix && name.startsWith(prefix)) name = name.slice(prefix.length);
-      return `${mark[states[i]]} ${name} — ${word[states[i]]}`;
+      const tag = files[i] && attached.has(files[i].path) ? ", attached" : "";
+      return `${mark[states[i]]} ${name} — ${word[states[i]]}${tag}`;
     });
     const done = states.filter((s) => s === "converted").length;
     const review = states.filter((s) => s === "review").length;
@@ -445,6 +448,7 @@ PdfToMd = {
 
     const metadataNames = this.getBoolPref("metadataNames", true);
     const jobs = [];
+    const parentOf = new Map(); // job -> parent item id
     for (const { parent, chosen } of groups.values()) {
       const all = parent ? this.itemPdfs(parent) : [];
       // Item details for the frontmatter.
@@ -459,18 +463,22 @@ PdfToMd = {
           const att = Zotero.Items.get(id);
           const path = att.getFilePath();
           const out = parent && metadataNames ? this.itemLabel(parent) : this.pdfStem(path);
-          jobs.push({ pdfs: [path], keys: [att.key], out, ...(meta && { meta }) });
+          const job = { pdfs: [path], keys: [att.key], out, ...(meta && { meta }) };
+          jobs.push(job);
+          if (parent) parentOf.set(job, parent.id);
         }
         continue;
       }
       const label = this.itemLabel(parent);
       if (mode === "merge") {
-        jobs.push({
+        const job = {
           pdfs: all.map((att) => att.getFilePath()),
           keys: all.map((att) => att.key),
           out: label,
           ...(meta && { meta }),
-        });
+        };
+        jobs.push(job);
+        parentOf.set(job, parent.id);
         continue;
       }
       const width = Math.max(2, String(all.length).length);
@@ -478,12 +486,14 @@ PdfToMd = {
         if (!chosen.has(att.id)) return;
         const path = att.getFilePath();
         const name = `${String(i + 1).padStart(width, "0")} - ${this.pdfStem(path)}`;
-        jobs.push({
+        const job = {
           pdfs: [path],
           keys: [att.key],
           out: mode === "flat" ? `${label} - ${name}` : `${label}/${name}`,
           meta: { ...(meta || {}), attachment: att.getField("title") },
-        });
+        };
+        jobs.push(job);
+        parentOf.set(job, parent.id);
       });
     }
     // Drop duplicates (an item and one of its PDFs both selected). Different
@@ -491,9 +501,14 @@ PdfToMd = {
     const seen = new Set();
     return jobs.filter((job) => {
       const key = this.jobKey(job);
-      return !seen.has(key) && seen.add(key);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      if (parentOf.has(job)) this.jobParents.set(key, parentOf.get(job));
+      return true;
     });
   },
+
+  jobParents: new Map(), // jobKey -> parent item id, for attaching the output
 
   // Bibliographic details of a regular item, for the frontmatter. Empty
   // fields are left out.
@@ -746,6 +761,75 @@ PdfToMd = {
     return rows;
   },
 
+  // The linked-file Markdown attachments of `parent`: [{ att, path }].
+  linkedMarkdown(parent) {
+    return parent
+      .getAttachments()
+      .map((id) => Zotero.Items.get(id))
+      .filter(
+        (att) =>
+          att.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_FILE &&
+          (att.getFilePath() || "").toLowerCase().endsWith(".md")
+      )
+      .map((att) => ({ att, path: att.getFilePath() }));
+  },
+
+  // Links each finished job's Markdown file to its item (when the
+  // "attachMarkdown" pref is on). A file that moved between the output folder
+  // and _needs_review/ updates its existing attachment.
+  async attachOutputs(run, rows) {
+    if (!this.getBoolPref("attachMarkdown", false)) return;
+    const outDir = this.getPref("outputDir").trim();
+    let failed = 0;
+    for (const row of rows) {
+      if (this.isActive(row) || row.state === "failed") continue;
+      try {
+        const parent = Zotero.Items.get(this.jobParents.get(row.key));
+        if (!parent) continue;
+        const found = await this.findOutput(row.job, outDir);
+        if (!found) continue;
+        const stem = PathUtils.filename(found.path).replace(/\.md$/i, "");
+        const title =
+          (row.job.meta?.attachment ? stem : "Markdown") +
+          (found.inReview ? " (needs review)" : "");
+        const existing = this.linkedMarkdown(parent);
+        if (existing.some((e) => e.path === found.path)) {
+          const e = existing.find((x) => x.path === found.path);
+          if (e.att.getField("title") !== title) {
+            e.att.setField("title", title);
+            await e.att.saveTx();
+          }
+          continue;
+        }
+        // The same file in the other location (review <-> output folder).
+        const review = PathUtils.join(outDir, "_needs_review");
+        const other = found.inReview
+          ? PathUtils.join(outDir, found.path.slice(review.length + 1))
+          : PathUtils.join(review, found.path.slice(outDir.length + 1));
+        const moved = existing.find((e) => e.path === other);
+        if (moved) {
+          await moved.att.relinkAttachmentFile(found.path);
+          moved.att.setField("title", title);
+          await moved.att.saveTx();
+        } else {
+          await Zotero.Attachments.linkFromFile({
+            file: found.path,
+            parentItemID: parent.id,
+            contentType: "text/markdown",
+            title,
+          });
+        }
+      } catch (e) {
+        failed++;
+        Zotero.logError("PdfToMd attach: " + e);
+      }
+    }
+    if (failed) {
+      run.batches.push({ text: `Could not attach ${failed} Markdown file(s) to their items.`, isError: true });
+    }
+    this.refreshSections();
+  },
+
   // One script call for `rows`. Errors are recorded in run.batches, so the
   // jobs queued after them still run.
   async runBatch(run, rows) {
@@ -825,6 +909,7 @@ PdfToMd = {
     } finally {
       run.phase = null;
       if (jobsFile) await IOUtils.remove(jobsFile, { ignoreAbsent: true });
+      await this.attachOutputs(run, rows);
       // Jobs the script never reported on (it crashed or didn't start).
       for (const row of rows) if (this.isActive(row)) row.state = "failed";
     }

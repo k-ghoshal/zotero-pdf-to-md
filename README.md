@@ -131,6 +131,7 @@ page_markers: "[PDF page N] starts each page; 'printed p. X' is the number print
 | Name files from item details | on | "Author - Year - Title" instead of the PDF's name, for items with one PDF. |
 | Remove repeating headers and footers | on | Strips lines repeated at the top or bottom of most pages. |
 | Overwrite Markdown files that already exist | off | When off, already converted PDFs are skipped. |
+| Attach the Markdown file to its Zotero item | off | Adds each file to its item as a linked file, titled "Markdown" (or the chapter name; "(needs review)" for files in `_needs_review/`). Zotero indexes it for search. Files that move between the output folder and `_needs_review/` keep their attachment. |
 | Handling items with several PDFs | Subfolder | Subfolder, no subfolder, or merge into one file. |
 
 **Advanced:**
